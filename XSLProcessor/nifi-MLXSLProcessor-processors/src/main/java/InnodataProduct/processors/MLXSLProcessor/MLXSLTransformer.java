@@ -1,6 +1,8 @@
 package InnodataProduct.processors.MLXSLProcessor;
 
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -13,10 +15,12 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import javax.xml.XMLConstants;
+import javax.xml.transform.ErrorListener;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Templates;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.transform.stream.StreamSource;
@@ -49,7 +53,9 @@ import org.apache.nifi.stream.io.BufferedInputStream;
 import org.apache.nifi.util.StopWatch;
 import org.apache.nifi.util.Tuple;
 
+import net.sf.saxon.Controller;
 import net.sf.saxon.TransformerFactoryImpl;
+import net.sf.saxon.event.MessageWarner;
 
 
 
@@ -72,6 +78,14 @@ public class MLXSLTransformer extends AbstractProcessor {
     public static final PropertyDescriptor XSLT_FILE_NAME = new PropertyDescriptor.Builder()
             .name("XSLT file name")
             .description("Provides the name (including full path) of the XSLT file to apply to the flowfile XML content.")
+            .required(true)
+            .expressionLanguageSupported(true)
+            .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+            .build();
+    
+    public static final PropertyDescriptor LOG_FILE_NAME = new PropertyDescriptor.Builder()
+            .name("Log file name")
+            .description("Provides the name (including full path) of the Log file for the logging.")
             .required(true)
             .expressionLanguageSupported(true)
             .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
@@ -133,6 +147,8 @@ public class MLXSLTransformer extends AbstractProcessor {
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> properties = new ArrayList<>();
         properties.add(XSLT_FILE_NAME);
+        properties.add(LOG_FILE_NAME);
+        
         properties.add(INDENT_OUTPUT);
         properties.add(SECURE_PROCESSING);
         properties.add(CACHE_SIZE);
@@ -211,9 +227,17 @@ public class MLXSLTransformer extends AbstractProcessor {
         final String xsltFileName = context.getProperty(XSLT_FILE_NAME)
             .evaluateAttributeExpressions(original)
             .getValue();
+        
+        //Creating logfile for xsl message
+        final String logFileName = context.getProperty(LOG_FILE_NAME).evaluateAttributeExpressions().getValue();
+        
+        File logFile = new File(logFileName);
+        
         final Boolean indentOutput = context.getProperty(INDENT_OUTPUT).asBoolean();
 
         try {
+        	
+        	
             FlowFile transformed = session.write(original, new StreamCallback() {
                 @Override
                 public void process(final InputStream rawIn, final OutputStream out) throws IOException {
@@ -231,8 +255,40 @@ public class MLXSLTransformer extends AbstractProcessor {
                     	f.setAttribute("http://saxon.sf.net/feature/version-warning", Boolean.FALSE);
                     	
                     	Transformer transformer = f.newTransformer(new StreamSource(xsltFileName));
+                    	transformer.setOutputProperty(OutputKeys.INDENT, (indentOutput ? "yes" : "no"));
+                    	FileWriter fr = null;
+                        BufferedWriter br = null;
+                        	
+                    	fr = new FileWriter(logFile);
+                    	br = new BufferedWriter(fr);
                     	
-                        transformer.setOutputProperty(OutputKeys.INDENT, (indentOutput ? "yes" : "no"));
+                    	transformer.setErrorListener(new ErrorListener() {
+                    		@Override
+							public void warning(TransformerException exception) throws TransformerException {
+								try {
+									br.write(exception.getLocalizedMessage());
+								} catch (IOException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+								}
+								
+							}
+							
+							@Override
+							public void fatalError(TransformerException exception) throws TransformerException {
+								warning(exception);
+								
+							}
+							
+							@Override
+							public void error(TransformerException exception) throws TransformerException {
+								warning(exception);
+								
+							}
+						});
+                    	
+                         Controller controller = (Controller) transformer;
+                         controller.setMessageEmitter(new MessageWarner());
 
                         // pass all dynamic properties to the transformer
                         for (final Map.Entry<PropertyDescriptor, String> entry : context.getProperties().entrySet()) {
@@ -257,7 +313,10 @@ public class MLXSLTransformer extends AbstractProcessor {
         } catch (ProcessException e) {
             logger.error("Unable to transform {} due to {}", new Object[]{original, e});
             session.transfer(original, REL_FAILURE);
-        }
+        } catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
     }
 
 	/*
