@@ -6,6 +6,10 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -15,6 +19,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.ErrorListener;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Templates;
@@ -52,6 +58,8 @@ import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.stream.io.BufferedInputStream;
 import org.apache.nifi.util.StopWatch;
 import org.apache.nifi.util.Tuple;
+import org.w3c.dom.Document;
+import org.xml.sax.InputSource;
 
 import net.sf.saxon.Controller;
 import net.sf.saxon.TransformerFactoryImpl;
@@ -83,22 +91,22 @@ public class MLXSLTransformer extends AbstractProcessor {
             .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
             .build();
     
-    public static final PropertyDescriptor LOG_FILE_NAME = new PropertyDescriptor.Builder()
-            .name("Log file name")
+    public static final PropertyDescriptor LOG_FILE = new PropertyDescriptor.Builder()
+            .name("Log file path")
             .description("Provides the name (including full path) of the Log file for the logging.")
-            .required(true)
+            .required(false)
             .expressionLanguageSupported(true)
-            .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+            .addValidator(StandardValidators.ATTRIBUTE_EXPRESSION_LANGUAGE_VALIDATOR)
             .build();
     
     
     
     public static final PropertyDescriptor MORE_INPUT_FILE_NAME = new PropertyDescriptor.Builder()
-    .name("Input file name")
+    .name("Order metadata file")
     .description("Provides the name (including full path) of the additional files for processing.")
-    .required(true)
+    .required(false)
     .expressionLanguageSupported(true)
-    .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+    .addValidator(StandardValidators.ATTRIBUTE_EXPRESSION_LANGUAGE_VALIDATOR)
     .build();
 
     public static final PropertyDescriptor INDENT_OUTPUT = new PropertyDescriptor.Builder()
@@ -155,6 +163,11 @@ public class MLXSLTransformer extends AbstractProcessor {
     
     FileWriter fr = null;
     BufferedWriter br = null;
+    String transformationErrorMessage;
+    
+    Path log_file_path = null;
+    String logFileName = "";
+    
     
     
 
@@ -162,7 +175,7 @@ public class MLXSLTransformer extends AbstractProcessor {
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> properties = new ArrayList<>();
         properties.add(XSLT_FILE_NAME);
-        properties.add(LOG_FILE_NAME);
+        properties.add(LOG_FILE);
         properties.add(MORE_INPUT_FILE_NAME);
         
         properties.add(INDENT_OUTPUT);
@@ -245,11 +258,14 @@ public class MLXSLTransformer extends AbstractProcessor {
             .getValue();
         
         //Creating logfile for xsl message
-        final String logFileName = context.getProperty(LOG_FILE_NAME).evaluateAttributeExpressions().getValue();
+        log_file_path = Paths.get(context.getProperty(LOG_FILE).evaluateAttributeExpressions().getValue());
+        
+        
         //Order XML or Json File Path
         final String More_input_File = context.getProperty(MORE_INPUT_FILE_NAME).evaluateAttributeExpressions().getValue();
+        final Path Order_file_path = Paths.get(More_input_File);
         
-        File logFile = new File(logFileName);
+        
         
         final Boolean indentOutput = context.getProperty(INDENT_OUTPUT).asBoolean();
         
@@ -257,6 +273,10 @@ public class MLXSLTransformer extends AbstractProcessor {
         
 
         try {
+        	
+        	if (!Files.exists(log_file_path)) {
+        		Files.createFile(log_file_path);
+        	}
         	
         	
             FlowFile transformed = session.write(original, new StreamCallback() {
@@ -278,7 +298,6 @@ public class MLXSLTransformer extends AbstractProcessor {
                     	
                     	Transformer transformer = f.newTransformer(new StreamSource(xsltFileName));
                     	transformer.setOutputProperty(OutputKeys.INDENT, (indentOutput ? "yes" : "no"));
-                    	
                         	
                     	
                     	transformer.setErrorListener(new ErrorListener() {
@@ -286,13 +305,22 @@ public class MLXSLTransformer extends AbstractProcessor {
 							public void warning(TransformerException exception) throws TransformerException {
 								try {
 									
-									fr = new FileWriter(logFile);
+									fr = new FileWriter(log_file_path.toString(), true);
 									br = new BufferedWriter(fr);
-								    
-									br.write(exception.getLocalizedMessage());
+									br.append(exception.getLocalizedMessage());
+									
 								} catch (IOException e) {
 									// TODO Auto-generated catch block
 									e.printStackTrace();
+									try {
+									
+										br.append(e.getLocalizedMessage());
+									
+									} catch (IOException e1) {
+										// TODO Auto-generated catch block
+										e1.printStackTrace();
+									}
+									
 								}
 								
 							}
@@ -310,8 +338,8 @@ public class MLXSLTransformer extends AbstractProcessor {
 							}
 						});
                     	
-                    	File lookupfile = new File(More_input_File);
-                    	transformer.setParameter("lookupfile", new StreamSource(lookupfile));
+                    	
+                    	transformer.setParameter("ORDER_FILE_LOC", Order_file_path.toString());
                     	
                          Controller controller = (Controller) transformer;
                          controller.setMessageEmitter(new MessageWarner());
