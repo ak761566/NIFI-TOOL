@@ -1,5 +1,6 @@
 package InnodataProduct.processors.MLXSLProcessor;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
@@ -99,8 +100,6 @@ public class MLXSLTransformer extends AbstractProcessor {
             .addValidator(StandardValidators.ATTRIBUTE_EXPRESSION_LANGUAGE_VALIDATOR)
             .build();
     
-    
-    
     public static final PropertyDescriptor MORE_INPUT_FILE_NAME = new PropertyDescriptor.Builder()
     .name("Order metadata file")
     .description("Provides the name (including full path) of the additional files for processing.")
@@ -161,15 +160,13 @@ public class MLXSLTransformer extends AbstractProcessor {
     private Set<Relationship> relationships;
     //private LoadingCache<String, Templates> cache;
     
-    FileWriter fr = null;
-    BufferedWriter br = null;
-    String transformationErrorMessage;
     
     Path log_file_path = null;
     String logFileName = "";
     
-    
-    
+    String TransformerException;
+    byte data[]; 
+        
 
     @Override
     protected void init(final ProcessorInitializationContext context) {
@@ -243,16 +240,18 @@ public class MLXSLTransformer extends AbstractProcessor {
 		 * logger.warn("Stylesheet cache disabled because cache size is set to 0"); }
 		 */
     }
-
+    
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) {
         final FlowFile original = session.get();
         if (original == null) {
             return;
         }
+        
 
         final ComponentLog logger = getLogger();
         final StopWatch stopWatch = new StopWatch(true);
+         
         final String xsltFileName = context.getProperty(XSLT_FILE_NAME)
             .evaluateAttributeExpressions(original)
             .getValue();
@@ -265,18 +264,17 @@ public class MLXSLTransformer extends AbstractProcessor {
         final String More_input_File = context.getProperty(MORE_INPUT_FILE_NAME).evaluateAttributeExpressions().getValue();
         final Path Order_file_path = Paths.get(More_input_File);
         
-        
-        
         final Boolean indentOutput = context.getProperty(INDENT_OUTPUT).asBoolean();
-        
-        
-        
-
+       
         try {
         	
         	if (!Files.exists(log_file_path)) {
         		Files.createFile(log_file_path);
         	}
+        	
+        	Path p = Paths.get(log_file_path.toUri());
+        	
+        	OutputStream out = new BufferedOutputStream(Files.newOutputStream(p));
         	
         	
             FlowFile transformed = session.write(original, new StreamCallback() {
@@ -298,31 +296,12 @@ public class MLXSLTransformer extends AbstractProcessor {
                     	
                     	Transformer transformer = f.newTransformer(new StreamSource(xsltFileName));
                     	transformer.setOutputProperty(OutputKeys.INDENT, (indentOutput ? "yes" : "no"));
-                        	
                     	
                     	transformer.setErrorListener(new ErrorListener() {
                     		@Override
 							public void warning(TransformerException exception) throws TransformerException {
-								try {
-									
-									fr = new FileWriter(log_file_path.toString(), true);
-									br = new BufferedWriter(fr);
-									br.append(exception.getLocalizedMessage());
-									
-								} catch (IOException e) {
-									// TODO Auto-generated catch block
-									e.printStackTrace();
-									try {
-									
-										br.append(e.getLocalizedMessage());
-									
-									} catch (IOException e1) {
-										// TODO Auto-generated catch block
-										e1.printStackTrace();
-									}
-									
-								}
-								
+                    			data = exception.getLocalizedMessage().getBytes();
+                    			
 							}
 							
 							@Override
@@ -351,7 +330,8 @@ public class MLXSLTransformer extends AbstractProcessor {
                                 transformer.setParameter(entry.getKey().getName(), value);
                             }
                         }
-
+                        
+                        out.write(data, 0, data.length);
                         // use a StreamSource with Saxon
                         StreamSource source = new StreamSource(in);
                         StreamResult result = new StreamResult(out);
@@ -364,6 +344,7 @@ public class MLXSLTransformer extends AbstractProcessor {
             session.transfer(transformed, REL_SUCCESS);
             session.getProvenanceReporter().modifyContent(transformed, stopWatch.getElapsed(TimeUnit.MILLISECONDS));
             logger.info("Transformed {}", new Object[]{original});
+            
         } catch (Exception e) {
             logger.error("Unable to transform {} due to {}", new Object[]{original, e});
             session.transfer(original, REL_FAILURE);
