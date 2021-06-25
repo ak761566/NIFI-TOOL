@@ -264,7 +264,7 @@ public class MLXSLTransformer extends AbstractProcessor {
         
         //Order XML or Json File Path
         final String More_input_File = context.getProperty(MORE_INPUT_FILE_NAME).evaluateAttributeExpressions().getValue();
-        final Path Order_file_path = Paths.get(More_input_File);
+        
         
         final Boolean indentOutput = context.getProperty(INDENT_OUTPUT).asBoolean();
        
@@ -320,7 +320,10 @@ public class MLXSLTransformer extends AbstractProcessor {
 						});
                     	
                     	
-                    	transformer.setParameter("ORDER_FILE_LOC", Order_file_path.toString());
+                    	
+                    	transformer.setParameter("ORDER_FILE_LOC", More_input_File);;
+                    	
+                    	//transformer.setParameter("ORDER_FILE_LOC", Order_file_path.toString());
                     	
                          Controller controller = (Controller) transformer;
                          controller.setMessageEmitter(new MessageWarner());
