@@ -7,6 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -164,10 +165,6 @@ public class MLXSLTransformer extends AbstractProcessor {
     Path log_file_path = null;
     String logFileName = "";
     
-    String TransformerException;
-    byte data[]; 
-        
-
     @Override
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> properties = new ArrayList<>();
@@ -257,7 +254,12 @@ public class MLXSLTransformer extends AbstractProcessor {
             .getValue();
         
         //Creating logfile for xsl message
+        FileWriter fw;
+        PrintWriter pw;
+        
         log_file_path = Paths.get(context.getProperty(LOG_FILE).evaluateAttributeExpressions().getValue());
+        
+        File log_file = new File(context.getProperty(LOG_FILE).evaluateAttributeExpressions().getValue());
         
         
         //Order XML or Json File Path
@@ -272,11 +274,11 @@ public class MLXSLTransformer extends AbstractProcessor {
         		Files.createFile(log_file_path);
         	}
         	
-        	Path p = Paths.get(log_file_path.toUri());
-        	
-        	OutputStream out = new BufferedOutputStream(Files.newOutputStream(p));
-        	
-        	
+        	fw = new FileWriter(log_file, true);
+			pw = new PrintWriter(fw);
+			
+			pw.write("********Error Log ***********");
+        	        	
             FlowFile transformed = session.write(original, new StreamCallback() {
                 @Override
                 public void process(final InputStream rawIn, final OutputStream out) throws IOException {
@@ -300,8 +302,8 @@ public class MLXSLTransformer extends AbstractProcessor {
                     	transformer.setErrorListener(new ErrorListener() {
                     		@Override
 							public void warning(TransformerException exception) throws TransformerException {
-                    			data = exception.getLocalizedMessage().getBytes();
-                    			
+                    			exception.getLocalizedMessage();
+                    			pw.write(exception.getLocalizedMessage());
 							}
 							
 							@Override
@@ -331,7 +333,6 @@ public class MLXSLTransformer extends AbstractProcessor {
                             }
                         }
                         
-                        out.write(data, 0, data.length);
                         // use a StreamSource with Saxon
                         StreamSource source = new StreamSource(in);
                         StreamResult result = new StreamResult(out);
@@ -344,6 +345,8 @@ public class MLXSLTransformer extends AbstractProcessor {
             session.transfer(transformed, REL_SUCCESS);
             session.getProvenanceReporter().modifyContent(transformed, stopWatch.getElapsed(TimeUnit.MILLISECONDS));
             logger.info("Transformed {}", new Object[]{original});
+            
+            pw.close();
             
         } catch (Exception e) {
             logger.error("Unable to transform {} due to {}", new Object[]{original, e});
