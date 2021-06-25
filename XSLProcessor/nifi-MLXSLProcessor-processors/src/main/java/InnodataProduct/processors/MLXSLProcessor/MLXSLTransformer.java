@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -66,6 +67,7 @@ import org.xml.sax.InputSource;
 import net.sf.saxon.Controller;
 import net.sf.saxon.TransformerFactoryImpl;
 import net.sf.saxon.event.MessageWarner;
+import net.sf.saxon.trans.XPathException;
 
 
 
@@ -257,13 +259,15 @@ public class MLXSLTransformer extends AbstractProcessor {
         FileWriter fw;
         PrintWriter pw;
         
-        log_file_path = Paths.get(context.getProperty(LOG_FILE).evaluateAttributeExpressions().getValue());
+        log_file_path = Paths.get(context.getProperty(LOG_FILE).evaluateAttributeExpressions(original).getValue());
         
-        File log_file = new File(context.getProperty(LOG_FILE).evaluateAttributeExpressions().getValue());
+        logger.info("log_file_path message" + log_file_path);
+        
+        File log_file = new File(context.getProperty(LOG_FILE).evaluateAttributeExpressions(original).getValue());
         
         
         //Order XML or Json File Path
-        final String More_input_File = context.getProperty(MORE_INPUT_FILE_NAME).evaluateAttributeExpressions().getValue();
+        final String More_input_File = context.getProperty(MORE_INPUT_FILE_NAME).evaluateAttributeExpressions(original).getValue();
         
         
         final Boolean indentOutput = context.getProperty(INDENT_OUTPUT).asBoolean();
@@ -274,10 +278,13 @@ public class MLXSLTransformer extends AbstractProcessor {
         		Files.createFile(log_file_path);
         	}
         	
+        	logger.info("log_file_path message" + log_file_path);
+        	
         	fw = new FileWriter(log_file, true);
 			pw = new PrintWriter(fw);
 			
 			pw.write("********Error Log ***********");
+			pw.write("\n");
         	        	
             FlowFile transformed = session.write(original, new StreamCallback() {
                 @Override
@@ -304,6 +311,8 @@ public class MLXSLTransformer extends AbstractProcessor {
 							public void warning(TransformerException exception) throws TransformerException {
                     			exception.getLocalizedMessage();
                     			pw.write(exception.getLocalizedMessage());
+                    			pw.write("\n");
+                     			
 							}
 							
 							@Override
@@ -325,8 +334,25 @@ public class MLXSLTransformer extends AbstractProcessor {
                     	
                     	//transformer.setParameter("ORDER_FILE_LOC", Order_file_path.toString());
                     	
+                    	Properties props = new Properties();
+                    	props.setProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+                    	//transformer.setErrorListener(new ErrorListener());
+                    	MessageWarner saxonWarner = new MessageWarner();
+						
+						 try { 
+							 saxonWarner.setOutputProperties(props);
+							 saxonWarner.setOutputStream(System.err); 
+						  	} 
+						  catch (XPathException e2)
+						 {
+						  e2.printStackTrace(); 
+						  }
+						  //((Controller)transformer).setMessageEmitter(saxonWarner);
+						 
+                    	
                          Controller controller = (Controller) transformer;
-                         controller.setMessageEmitter(new MessageWarner());
+                         //controller.setMessageEmitter(new MessageWarner());
+                         controller.setMessageEmitter(saxonWarner);
 
                         // pass all dynamic properties to the transformer
                         for (final Map.Entry<PropertyDescriptor, String> entry : context.getProperties().entrySet()) {
@@ -348,13 +374,16 @@ public class MLXSLTransformer extends AbstractProcessor {
             session.transfer(transformed, REL_SUCCESS);
             session.getProvenanceReporter().modifyContent(transformed, stopWatch.getElapsed(TimeUnit.MILLISECONDS));
             logger.info("Transformed {}", new Object[]{original});
+            pw.write("Transformed {}" + new Object[]{original});
+            pw.write("\n");
             
-            pw.close();
+            pw.close();    
             
         } catch (Exception e) {
             logger.error("Unable to transform {} due to {}", new Object[]{original, e});
             session.transfer(original, REL_FAILURE);
         } 
+        
     }
 
 	/*
